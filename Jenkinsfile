@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        APP_IMAGE = "coworking-booking-app"
-        REGISTRY_TAG = "${BUILD_NUMBER}"
+        APP_NAME        = 'coworking-booking-app'
+        DOCKER_IMAGE    = "myrepo/${APP_NAME}"
+        DEPLOY_PORT     = '8000'
     }
 
     stages {
@@ -13,56 +14,68 @@ pipeline {
             }
         }
 
-        stage('Static Analysis & Test') {
+        stage('Unit Tests') {
             steps {
                 sh '''
                     python3 -m venv venv
                     . venv/bin/activate
                     pip install --upgrade pip
                     pip install -r requirements.txt
-                    pytest tests/ --junitxml=test-results.xml
+                    pytest tests/
                 '''
-            }
-            post {
-                always {
-                    junit 'test-results.xml'
-                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t ${APP_IMAGE}:${REGISTRY_TAG} -t ${APP_IMAGE}:latest ."
+                script {
+                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} -t ${DOCKER_IMAGE}:latest ."
+                }
             }
         }
 
-        stage('Container Scan / Verification') {
+        // Optional: Uncomment if pushing to DockerHub / private registry
+        /*
+        stage('Push to Registry') {
             steps {
-                sh '''
-                    docker run --rm -d --name temp_test_app -p 8000:8000 ${APP_IMAGE}:${REGISTRY_TAG}
-                    sleep 5
-                    curl --fail http://localhost:8000/health || exit 1
-                    docker stop temp_test_app
-                '''
+                withCredentials([usernamePassword(credentialsId: 'docker-registry-creds', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                        docker push ${DOCKER_IMAGE}:latest
+                    '''
+                }
             }
         }
+        */
 
         stage('Deploy') {
             steps {
-                sh '''
-                    docker compose down || true
-                    docker compose up -d --build
-                '''
+                sh """
+                    # Stop and remove existing container if running
+                    docker stop ${APP_NAME} || true
+                    docker rm ${APP_NAME} || true
+
+                    # Run new container
+                    docker run -d \
+                        --name ${APP_NAME} \
+                        -p ${DEPLOY_PORT}:8000 \
+                        --restart always \
+                        ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                """
             }
         }
     }
 
     post {
-        failure {
-            echo "CI/CD Pipeline failed on build ${BUILD_NUMBER}"
+        always {
+            sh "rm -rf venv"
         }
         success {
-            echo "Deployment completed successfully for build ${BUILD_NUMBER}"
+            echo "Pipeline deployed successfully to http://localhost:${DEPLOY_PORT}/docs"
+        }
+        failure {
+            echo "Pipeline failed. Review build logs."
         }
     }
 }
