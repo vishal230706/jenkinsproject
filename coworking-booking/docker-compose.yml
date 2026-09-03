@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: coworking-booking-app:${TAG:-latest}
+    container_name: coworking_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://cowork_user:cowork_secure_pass@db:5432/coworking_db}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - coworking_net
+
+  db:
+    image: postgres:15-alpine
+    container_name: coworking_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-coworking_db}
+      POSTGRES_USER: ${POSTGRES_USER:-cowork_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cowork_secure_pass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cowork_user} -d ${POSTGRES_DB:-coworking_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coworking_net
+
+volumes:
+  pgdata:
+
+networks:
+  coworking_net:
+    driver: bridge
